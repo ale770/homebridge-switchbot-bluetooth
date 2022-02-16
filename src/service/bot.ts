@@ -20,7 +20,7 @@ export const BotMode = {
 
 export class Bot {
   private readonly switchbotClient = new SwitchBot();
-  private readonly nodeCache = new NodeCache({ stdTTL: 3600, useClones: false, deleteOnExpire: true });
+  private readonly nodeCache = new NodeCache({ stdTTL: 60, useClones: false, deleteOnExpire: true });
 
   private readonly cacheKey = 'mybot';
 
@@ -38,7 +38,6 @@ export class Bot {
 
   private readonly log: Logging;
 
-  private readonly maxRetries = 3;
   private retryCount = 0;
 
   private mode = BotMode.PRESS;
@@ -48,6 +47,9 @@ export class Bot {
   private switchState = false;
 
   private scanning = false;
+  private findingDevice = false;
+
+  private runTimer;
 
   constructor(
     hap: HAP,
@@ -99,7 +101,8 @@ export class Bot {
 
   private handleGetSwitchValue = async (callback: CharacteristicGetCallback) => {
     try {
-      this.log.debug(`Handle Get Switch State :: ${this.bleMac} :: ${this.switchState}`);
+      const stateString = this.switchState ? 'ON' : 'OFF';
+      this.log.debug(`Handle Get Switch State :: ${this.bleMac} :: ${stateString}`);
       const cachedDevice = this.getDeviceFromCache();
       if (!cachedDevice) {
         await this.findDevice();
@@ -112,44 +115,35 @@ export class Bot {
   };
 
   private handleSetSwitchValue = async (state: CharacteristicValue, callback: CharacteristicSetCallback) => {
+    const newStateString = state ? 'ON' : 'OFF';
     try {
-      this.log.debug(`Handle Set Switch State :: ${this.bleMac} :: ${state}`);
+      this.log.debug(`Handle Set Switch State :: ${this.bleMac} :: ${newStateString}`);
 
       const newState = Boolean(state);
 
       if (newState === this.switchState) {
-        this.botService
-          .getCharacteristic(this.hap.Characteristic.On)
-          .updateValue(newState);
+        this.updateServiceState(newState);
         callback(HAPStatus.SUCCESS);
         this.retryCount = 0;
         return;
       }
 
       if (this.mode === BotMode.PRESS && !newState) {
-        this.botService
-          .getCharacteristic(this.hap.Characteristic.On)
-          .updateValue(false);
+        this.updateServiceState(false);
         this.switchState = false;
         callback(HAPStatus.SUCCESS);
         this.retryCount = 0;
         return;
       }
 
-      this.botService
-        .getCharacteristic(this.hap.Characteristic.On)
-        .updateValue(newState);
-
-      await this.setState(newState);
-
-      this.switchState = newState;
+      await this.setDeviceState(newState);
 
       if (this.mode === BotMode.PRESS && newState) {
-        await delay(5000);
-        this.botService
-          .getCharacteristic(this.hap.Characteristic.On)
-          .updateValue(false);
+        this.updateServiceState(false);
         this.switchState = false;
+      } else {
+        this.updateServiceState(newState);
+        this.switchState = newState;
       }
 
       this.retryCount = 0;
@@ -157,12 +151,12 @@ export class Bot {
     } catch (e) {
       this.log.error(`${e}`);
       this.clean();
-      if (this.retryCount >= this.maxRetries) {
+      if (this.retryCount >= this.scanRetries) {
         this.retryCount = 0;
         callback(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       } else {
         this.retryCount += 1;
-        this.log.debug(`Retrying Handle Set Switch State :: ${this.bleMac} :: ${state} :: ${this.retryCount}`);
+        this.log.debug(`Retrying Handle Set Switch State :: ${this.bleMac} :: ${newStateString} :: ${this.retryCount}`);
         await this.handleSetSwitchValue(state, callback);
       }
     }
@@ -177,7 +171,7 @@ export class Bot {
         this.mode = mode ? BotMode.SWITCH : BotMode.PRESS;
         this.state = state;
         this.batteryLevel = battery;
-        this.log.debug(`On Advertisement :: ${this.bleMac} :: ${this.mode} :: ${this.state} :: ${this.batteryLevel}`);
+        // this.log.debug(`On Advertisement :: ${this.bleMac} :: ${this.mode} :: ${this.state} :: ${this.batteryLevel}`);
       }
     };
     await this.findDevice();
@@ -185,10 +179,10 @@ export class Bot {
 
   private clean = () => {
     this.nodeCache.del(this.cacheKey);
-    this.scanning = false;
+    this.findingDevice = false;
   };
 
-  private setState = async (state: boolean): Promise<void> => {
+  private setDeviceState = async (state: boolean): Promise<void> => {
     const device = await this.findDevice();
     if (state) {
       await device.turnOn();
@@ -197,45 +191,67 @@ export class Bot {
     }
   };
 
+  private updateServiceState = (state: boolean) => {
+    if (this.runTimer) {
+      clearTimeout(this.runTimer);
+    }
+    this.runTimer = setTimeout(() => {
+      this.botService
+        .getCharacteristic(this.hap.Characteristic.On)
+        .updateValue(state);
+    }, 500);
+  };
+
   private scanForState = async (): Promise<void> => {
-    if (!this.scanning) {
-      this.scanning = true;
-      await this.switchbotClient.startScan({ model: 'H', id: this.bleMac });
-      await this.switchbotClient.wait(this.scanDuration);
-      this.switchbotClient.stopScan();
+    try {
+      if (!this.scanning) {
+        this.scanning = true;
+        await this.switchbotClient.startScan({ model: 'H', id: this.bleMac });
+        await this.switchbotClient.wait(this.scanDuration);
+        this.switchbotClient.stopScan();
+        this.scanning = false;
+      }
+    } catch (e) {
       this.scanning = false;
+      throw e;
     }
   };
 
   private getDeviceFromCache = () => this.nodeCache.get(this.cacheKey);
 
-  private findDevice = async (): Promise<SwitchbotDeviceWoHand> => {
+  private findDevice = async (): Promise<SwitchbotDeviceWoHand | null> => {
     const cachedBot = this.getDeviceFromCache();
     if (cachedBot) {
       this.log.debug(`Device from cache :: ${this.bleMac}`);
       return cachedBot;
     }
 
-    for (let i = 0; i < this.scanRetries; i += 1) {
-      const devices: SwitchbotDeviceWoHand[] = await this.switchbotClient.discover({
-        id: this.bleMac,
-        duration: this.scanDuration,
-        quick: true,
-        model: 'H',
-      });
-
-
-      if (!devices || !devices.length) {
-        await delay(this.scanCooldown);
-      }
-
-      if (devices && devices.length) {
-        this.log.info(`Found Device :: ${this.bleMac} :: ${i}`);
-        this.nodeCache.set(this.cacheKey, devices[0]);
-        this.scanForState();
-        return devices[0];
-      }
+    if (this.findingDevice) {
+      throw new Error(`Another process is already trying to find a device :: ${this.bleMac}`);
     }
+
+    this.findingDevice = true;
+    const devices: SwitchbotDeviceWoHand[] = await this.switchbotClient.discover({
+      id: this.bleMac,
+      duration: this.scanDuration,
+      quick: true,
+      model: 'H',
+    });
+
+    if (!devices || !devices.length) {
+      await delay(this.scanCooldown);
+    }
+
+    if (devices && devices.length) {
+      this.log.info(`Found Device :: ${this.bleMac}`);
+      this.nodeCache.set(this.cacheKey, devices[0]);
+      this.scanForState();
+      this.findingDevice = false;
+      return devices[0];
+    }
+
+    this.findingDevice = false;
     throw new Error(`Device Not Found :: ${this.bleMac}`);
   };
+
 }
