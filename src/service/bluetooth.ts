@@ -16,12 +16,16 @@ export default class BluetoothClient {
     noble.on('discover', async (peripheral) => {
       console.log('discover')
       await noble.stopScanningAsync();
+      console.log('connectAsync')
       await peripheral.connectAsync();
+      console.log('discoverSomeServicesAndCharacteristicsAsync')
       const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync([PRIMARY_UUID], [CHARACTERISTIC_UUID]);
       // const batteryLevel = (await characteristics[0].readAsync())[0];
+      console.log('writeAsync')
       await characteristics[0].writeAsync(Buffer.from(CHAR_ON), false);
 
       // console.log(`${peripheral.address} (${peripheral.advertisement.localName}): ${batteryLevel}%`);
+      console.log('disconnectAsync')
 
       await peripheral.disconnectAsync();
     });
