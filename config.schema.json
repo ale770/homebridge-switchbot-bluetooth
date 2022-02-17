@@ -30,23 +30,21 @@
         "type": "string",
         "required": true
       },
-      "scanCooldown": {
-        "title": "Scan Cooldown",
+      "mode": {
+        "title": "Type",
         "type": "number",
-        "default": "1000",
-        "required": false
-      },
-      "scanRetries": {
-        "title": "Scan Retries",
-        "type": "number",
-        "default": "5",
-        "required": false
-      },
-      "scanDuration": {
-        "title": "Scan Duration",
-        "type": "number",
-        "default": "5000",
-        "required": false
+        "required": true,
+        "default": 1,
+        "oneOf": [
+          {
+            "title": "Press",
+            "enum": [1]
+          },
+          {
+            "title": "Switch",
+            "enum": [2]
+          }
+        ]
       }
     }
   },

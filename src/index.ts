@@ -23,9 +23,7 @@ class SwitchBotAccessory implements AccessoryPlugin {
     name: string;
     type: string;
     deviceId: string;
-    scanRetries: number;
-    scanDuration: number;
-    scanCooldown: number;
+    mode: number;
   };
 
   services: Service[];
@@ -37,9 +35,8 @@ class SwitchBotAccessory implements AccessoryPlugin {
       name: config.name || 'SwitchBot',
       deviceId: config.deviceId,
       type: config.type,
-      scanCooldown: config.scanCooldown || 1000,
-      scanRetries: config.scanRetries || 5,
-      scanDuration: config.scanDuration || 5000,
+      mode: config.mode,
+
     };
 
     if (this.config.type === AccessoryType.BOT) {
@@ -48,9 +45,7 @@ class SwitchBotAccessory implements AccessoryPlugin {
         this.log,
         this.config.name,
         this.config.deviceId,
-        this.config.scanCooldown,
-        this.config.scanRetries,
-        this.config.scanDuration,
+        this.config.mode,
       );
       this.services = botAccessory.getServices();
     } else {
