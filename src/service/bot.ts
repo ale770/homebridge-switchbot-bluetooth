@@ -57,7 +57,7 @@ export class Bot {
     this.bleMac = bleMac;
     this.mode = mode;
 
-    this.bluetoothClient = new BluetoothClient(bleMac);
+    this.bluetoothClient = new BluetoothClient(this.bleMac);
 
     this.informationService = new hap.Service.AccessoryInformation()
       .setCharacteristic(hap.Characteristic.Manufacturer, 'SwitchBot')

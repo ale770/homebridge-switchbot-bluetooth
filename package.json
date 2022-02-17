@@ -27,9 +27,7 @@
     "homebridge-plugin"
   ],
   "dependencies": {
-    "@abandonware/bluetooth-hci-socket": "^0.5.3-8",
     "@abandonware/noble": "^1.9.2-15",
-    "bluez": "^0.4.5",
     "node-cache": "^5.1.2"
   },
   "devDependencies": {
